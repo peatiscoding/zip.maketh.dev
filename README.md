@@ -19,10 +19,7 @@ This is the [zip.maketh.dev](https://zip.maketh.dev) website's repository.
 
 ## About This Repository Data Source
 
-Item|Source
---|--
-Sub-District's Lat + Long|[data.go.th](https://data.go.th/dataset/item_c6d42e1b-3219-47e1-b6b7-dfe914f27910)
-PostalCode Information|??
+Please see `data-curncher/sources`. [Soruce](./data-cruncher/sources/)
 
 # Implementation
 
