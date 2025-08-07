@@ -29,10 +29,12 @@ export interface BoundProvince extends RawProvince {
 }
 
 export interface BoundDistrict extends RawDistrict {
+  province: BoundProvince
   subDistricts: BoundSubDistrict[]
 }
 
 export interface BoundSubDistrict extends RawSubDistrict {
+  distrct: BoundDistrict
   zipCodes: BoundZipCode[]
 }
 

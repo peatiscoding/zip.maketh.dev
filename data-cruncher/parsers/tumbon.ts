@@ -1,6 +1,7 @@
 import type { RawDistrict, RawProvince, RawSubDistrict } from '@types'
 import type { ITumbonParser, IParserDataKeyGenerator } from './interface'
 import * as XLSX from 'xlsx'
+import { AbstractParser } from './base'
 
 interface ExcelRow {
   CH_ID: number
@@ -16,7 +17,7 @@ interface ExcelRow {
   AD_LEVEL?: number
 }
 
-export class TumbonFileParser implements ITumbonParser {
+export class TumbonFileParser extends AbstractParser implements ITumbonParser {
   async parse(
     sourceStream: ReadableStream,
     keyGenerator: IParserDataKeyGenerator
@@ -38,32 +39,6 @@ export class TumbonFileParser implements ITumbonParser {
     const data = XLSX.utils.sheet_to_json<ExcelRow>(worksheet)
 
     return this.processHierarchicalData(data, keyGenerator)
-  }
-
-  private async streamToBuffer(stream: ReadableStream): Promise<Buffer> {
-    const reader = stream.getReader()
-    const chunks: Uint8Array[] = []
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        chunks.push(value)
-      }
-    } finally {
-      reader.releaseLock()
-    }
-
-    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0)
-    const buffer = new Uint8Array(totalLength)
-    let offset = 0
-
-    for (const chunk of chunks) {
-      buffer.set(chunk, offset)
-      offset += chunk.length
-    }
-
-    return Buffer.from(buffer)
   }
 
   private processHierarchicalData(
@@ -90,7 +65,8 @@ export class TumbonFileParser implements ITumbonParser {
           en: row.CHANGWAT_E
         }
       }
-      const provinceKey = keyGenerator.province(province)
+      const provinceKey = keyGenerator.province(row.CH_ID.toString(), province)
+      province.code = provinceKey
       if (!provinces[provinceKey]) {
         provinces[provinceKey] = province
       }
@@ -103,7 +79,12 @@ export class TumbonFileParser implements ITumbonParser {
           en: row.AMPHOE_E
         }
       }
-      const districtKey = keyGenerator.district(district)
+      const districtKey = keyGenerator.district(
+        row.CH_ID.toString(),
+        row.AM_ID.toString(),
+        district
+      )
+      district.code = districtKey
       if (!districts[districtKey]) {
         districts[districtKey] = district
       }
@@ -116,7 +97,13 @@ export class TumbonFileParser implements ITumbonParser {
           en: row.TAMBON_E
         }
       }
-      const subDistrictKey = keyGenerator.subDistrict(subDistrict)
+      const subDistrictKey = keyGenerator.subDistrict(
+        row.CH_ID.toString(),
+        row.AM_ID.toString(),
+        row.TA_ID.toString(),
+        subDistrict
+      )
+      subDistrict.code = subDistrictKey
       if (!subDistricts[subDistrictKey]) {
         subDistricts[subDistrictKey] = subDistrict
       } else {

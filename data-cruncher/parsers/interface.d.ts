@@ -9,9 +9,14 @@ interface IParserTarget {
 }
 
 export interface IParserDataKeyGenerator {
-  province: (record: RawProvince) => string
-  district: (record: RawDistrict) => string
-  subDistrict: (record: RawSubDistrict) => string
+  province: (provinceId: string, record: RawProvince) => string
+  district: (proinceId: string, districtId: string, record: RawDistrict) => string
+  subDistrict: (
+    provinceId: string,
+    districtId: string,
+    subDistrictId: string,
+    record: RawSubDistrict
+  ) => string
 }
 
 export interface IParser {
