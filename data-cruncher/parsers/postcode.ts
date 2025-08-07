@@ -5,6 +5,7 @@ import type { TextItem, TextMarkedContent } from 'pdfjs-dist/types/src/display/a
 import * as pdfjsLib from 'pdfjs-dist'
 import { AbstractParser } from './base'
 import { sortBy } from 'lodash'
+import { PageViewport } from 'pdfjs-dist/types/src/display/display_utils'
 
 interface PDFTextItem {
   str: string
@@ -59,6 +60,7 @@ export class PostcodePDFParser extends AbstractParser implements IPostcodeParser
       const textContent = await page.getTextContent()
 
       console.log(`📐 Page dimensions: ${viewport.width}x${viewport.height}`)
+      console.log(`📐  .. Offset: x = ${viewport.offsetX}, y = ${viewport.offsetY}`)
       console.log(`📝 Found ${textContent.items.length} text items`)
 
       // Process text items with their coordinates
@@ -66,7 +68,7 @@ export class PostcodePDFParser extends AbstractParser implements IPostcodeParser
     }
 
     // order text items based on `pageNum` and `column`
-    const sorted = sortBy(textItems, ['pageNum', 'column'])
+    const sorted = sortBy(textItems, ['pageNum', 'column', (d) => -d.y])
 
     console.log('SORTED', sorted)
 
@@ -82,16 +84,15 @@ export class PostcodePDFParser extends AbstractParser implements IPostcodeParser
       width: number
       height: number
     }[],
-    viewport: { width: number; height: number },
+    vp: PageViewport,
     pageNum: number
   ): PositionedTextItem[] {
     const colCount = 7
-    console.log('VIEW PORT WIDTH', viewport.width)
+    const indentOffset = 50
     const criteria = new Array<number>(colCount)
       .fill(0)
-      .map((_, i, a) => (colCount - i) * (viewport.width / colCount))
+      .map((_, i) => (colCount - i - 1) * ((vp.width - indentOffset * 2) / colCount) + indentOffset)
 
-    console.log('QU', criteria) // FIXME: Need Compesate for content's padding
     // Convert PDF text items to positioned items
     const positionedItems: PositionedTextItem[] = textItems
       .filter((a) => a.str.trim() !== '')
@@ -100,7 +101,7 @@ export class PostcodePDFParser extends AbstractParser implements IPostcodeParser
         const x = item.transform[4]
         const y = item.transform[5]
         const colIndex = criteria.reduce(
-          (pv, offsetRequired, i) => pv || (x > offsetRequired ? i + 1 : 0),
+          (pv, offsetRequired, i) => pv || (x > offsetRequired ? colCount - i + 1 : 0),
           0
         ) // return 1~7
         // positioning
@@ -115,6 +116,7 @@ export class PostcodePDFParser extends AbstractParser implements IPostcodeParser
           column: colIndex // Will be assigned below
         }
       })
+      .filter((a) => a.column > 0)
 
     // Sort my positionedItems from top-bottom, then left-to-right (column, y)
     return positionedItems
