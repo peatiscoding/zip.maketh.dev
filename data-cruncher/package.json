@@ -1,0 +1,26 @@
+{
+  "name": "data-cruncher",
+  "version": "1.0.0",
+  "description": "CLI tool to compile Thailand postal code data from multiple sources",
+  "main": "cli.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run cli.ts",
+    "compile": "bun run cli.ts compile",
+    "help": "bun run cli.ts help"
+  },
+  "bin": {
+    "data-cruncher": "./cli.ts"
+  },
+  "keywords": [
+    "thailand",
+    "postal-code",
+    "data-processing",
+    "cli",
+    "bun"
+  ],
+  "devDependencies": {
+    "@types/bun": "^1.2.19",
+    "@types/node": "^22.0.0"
+  }
+}
