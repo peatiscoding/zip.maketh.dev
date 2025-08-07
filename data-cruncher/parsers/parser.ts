@@ -10,6 +10,7 @@ import { mapValues } from 'lodash'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { TumbonFileParser } from './tumbon'
+import { PostcodePDFParser } from './postcode'
 import { BoundDistrict, BoundProvince, BoundSubDistrict } from '@types'
 
 // Create default key generator
@@ -30,26 +31,36 @@ const revertKeyScheme = {
 export class Parser implements IParser {
   public constructor(
     protected tumbon: ITumbonParser,
-    protected postcode?: IPostcodeParser
+    protected postcode: IPostcodeParser
   ) {}
 
   static create(): Parser {
     const tumbonParser = new TumbonFileParser()
-    return new Parser(tumbonParser)
+    const postcodeParser = new PostcodePDFParser()
+    return new Parser(tumbonParser, postcodeParser)
   }
 
   async parse(target: IParserTarget): Promise<void> {
     const boundedSubDistricts = await this.parseTumbon(target)
+    await this.parsePostCodes(target, boundedSubDistricts)
+  }
+
+  private async parsePostCodes(
+    target: IParserTarget,
+    boundedSubDistricts: BoundSubDistrict[]
+  ): Promise<void> {
     // Parse postcode data
-    const tumbonPath = join(target.ditPath, target.files.postcodes)
-    const tumbonBuffer = await readFile(tumbonPath)
-    const tumbonStream = new ReadableStream({
+    console.log('📄 Processing postalcode.pdf...')
+    const postcodePath = join(target.ditPath, target.files.postcodes)
+    const postcodeBuffer = await readFile(postcodePath)
+    const postcodeStream = new ReadableStream({
       start(controller) {
-        controller.enqueue(tumbonBuffer)
+        controller.enqueue(postcodeBuffer)
         controller.close()
       }
     })
-    // this.postcode?.parse(target ,boundedSubDistricts)
+
+    await this.postcode.parse(postcodeStream, boundedSubDistricts)
   }
 
   private async parseTumbon(target: IParserTarget): Promise<BoundSubDistrict[]> {
@@ -72,15 +83,7 @@ export class Parser implements IParser {
     console.log(`✅ Parsed ${Object.keys(tumbonData.districts).length} districts`)
     console.log(`✅ Parsed ${Object.keys(tumbonData.subDistricts).length} sub-districts`)
 
-    // TODO: Parse postcode file when IPostcodeParser is implemented
-    if (this.postcode) {
-      console.log('📄 Processing postalcode.pdf...')
-      // Implementation will be added when postcode parser is ready
-    } else {
-      console.log('⚠️  Postcode parser not implemented yet')
-    }
-
-    console.log('🔗 Data parsing completed!')
+    console.log('🔗 Tumbon parsing completed!')
 
     // prepare 'bounded' buffer
     const provinces: Record<string, BoundProvince> = mapValues(
