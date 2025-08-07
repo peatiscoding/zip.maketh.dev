@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from 'util'
+import { Parser } from './parsers'
+import { join } from 'path'
 
 interface CLIOptions {
   help?: boolean
@@ -97,15 +99,27 @@ EXAMPLES:
   }
 
   private async handleCompile(args: string[]): Promise<void> {
-    console.log('🔄 Starting data compilation...')
+    try {
+      const parser = Parser.create()
 
-    // TODO: Implement actual compilation logic
-    console.log('📄 Processing postalcode.pdf...')
-    console.log('📊 Processing tumbon.xlsx...')
-    console.log('🔗 Merging data sources...')
-    console.log('✅ Compilation completed successfully!')
+      const sourcesPath = join(process.cwd(), 'sources')
+      const target = {
+        ditPath: sourcesPath,
+        files: {
+          tumbon: 'tumbon.xlsx',
+          postcodes: 'postalcode.pdf'
+        }
+      }
 
-    console.log('\n📍 Output: Compiled Thai postal code data ready for use')
+      await parser.parse(target)
+      console.log('\n📍 Output: Compiled Thai postal code data ready for use')
+    } catch (error) {
+      console.error(
+        '❌ Compilation failed:',
+        error instanceof Error ? error.message : String(error)
+      )
+      throw error
+    }
   }
 }
 
@@ -116,4 +130,3 @@ if (import.meta.main) {
 }
 
 export { DataCruncherCLI }
-

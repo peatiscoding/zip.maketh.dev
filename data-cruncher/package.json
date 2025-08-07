@@ -19,6 +19,9 @@
     "cli",
     "bun"
   ],
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  },
   "devDependencies": {
     "@types/bun": "^1.2.19",
     "@types/node": "^22.0.0"
