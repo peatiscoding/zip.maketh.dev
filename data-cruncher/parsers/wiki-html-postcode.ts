@@ -127,26 +127,14 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
       // Extract province names (Thai and English if available)
       const provinceMatch = provinceText.match(/^([^\s(]+)(?:\s*\(([^)]+)\))?/)
       const provinceNameTh = provinceMatch ? provinceMatch[1] : provinceText
-      const provinceNameEn = provinceMatch ? provinceMatch[2] || '' : ''
 
       // Validate province on-the-fly using lookup map
       const lookupKey = provinceNameTh.toLowerCase().trim()
-      if (!provinceLookup.has(lookupKey)) {
-        // Try alternative matching strategies
-        let found = false
-        for (const [key, _] of provinceLookup) {
-          if (
-            key.includes(lookupKey) ||
-            lookupKey.includes(key)
-          ) {
-            found = true
-            break
-          }
-        }
-        if (!found) {
-          console.error(`❌ Province validation failed: "${provinceNameTh}" not found in Tumbon data`)
-          throw new Error(`Province validation failed: Wikipedia province "${provinceNameTh}" does not match any Tumbon province`)
-        }
+      const foundProvince = provinceLookup.get(lookupKey)
+      if (!foundProvince) {
+        throw new Error(
+          `Province validation failed: Wikipedia province "${provinceNameTh}" does not match any Tumbon province`
+        )
       }
 
       // Go up one level to the div containing this h2
@@ -180,8 +168,8 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
           if (postalCodeMatches && districtText) {
             postalCodeMatches.forEach((postcode) => {
               postcodeRecords.push({
-                provinceNameTh,
-                provinceNameEn,
+                provinceNameTh: foundProvince.title.th,
+                provinceNameEn: foundProvince.title.en,
                 districtName: districtText,
                 postalCode: postcode,
                 notes: noteText
