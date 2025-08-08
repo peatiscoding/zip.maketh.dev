@@ -1,6 +1,5 @@
 import type { IPostcodeParser } from './interface'
 import type { BoundSubDistrict, BoundZipCode } from '@types'
-import type { TextItem, TextMarkedContent } from 'pdfjs-dist/types/src/display/api'
 
 import * as pdfjsLib from 'pdfjs-dist'
 import { AbstractParser } from './base'
@@ -24,6 +23,7 @@ interface PositionedTextItem {
   height: number
   pageNum: number
   column: number
+  kind: 'postcode' | 'district' | 'clause' | 'province'
 }
 
 interface PDFPage {
@@ -33,6 +33,50 @@ interface PDFPage {
     height: number
   }
   items: PDFTextItem[]
+}
+
+interface PostcodeMatchingRecord {
+  postCode: string
+  provinceName: string
+  exceptionClauses: string
+  subDistrict: string[]
+  district: string
+}
+
+class PostcodeCollector {
+  currentProvince: string = ''
+  currentDistrict: string = ''
+  currentClauses: string[] = []
+
+  public out: PostcodeMatchingRecord[]
+
+  constructor() {
+    this.out = []
+  }
+
+  public collect(item: PositionedTextItem) {
+    if (item.kind === 'province') {
+      this.currentProvince = item.text
+      this.currentClauses = []
+    } else if (item.kind === 'district') {
+      this.currentDistrict = item.text
+      this.currentClauses = []
+    } else if (item.kind === 'clause') {
+      this.currentClauses.push(item.text)
+    } else if (item.kind === 'postcode') {
+      /// commit result
+      this.out.push({
+        provinceName: this.currentProvince,
+        district: this.currentDistrict,
+        postCode: item.text,
+        exceptionClauses: this.currentClauses.join(' '),
+        subDistrict: []
+      })
+
+      console.log('MATCHED >>> ', this.out[this.out.length - 1])
+      this.currentClauses = []
+    }
+  }
 }
 
 export class PostcodePDFParser extends AbstractParser implements IPostcodeParser {
@@ -68,9 +112,20 @@ export class PostcodePDFParser extends AbstractParser implements IPostcodeParser
     }
 
     // order text items based on `pageNum` and `column`
-    const sorted = sortBy(textItems, ['pageNum', 'column', (d) => -d.y])
+    const yScaling = 3
+    const sorted = sortBy(textItems, [
+      'pageNum',
+      'column',
+      (d) => -Math.floor(d.y / yScaling), // same y Groupping based on Y
+      (d) => d.x
+    ])
 
-    console.log('SORTED', sorted)
+    const collector = new PostcodeCollector()
+    for (const item of sorted) {
+      collector.collect(item)
+    }
+
+    console.log('COLLECTED', collector.out.length, 'records')
 
     // Return empty array for now since we're just detecting provinces
     return []
@@ -81,6 +136,8 @@ export class PostcodePDFParser extends AbstractParser implements IPostcodeParser
       str: string
       // PDF uses transform matrix [scaleX, skewX, skewY, scaleY, translateX, translateY]
       transform: [number, number, number, number, number, number]
+      fontName: string
+      hasEOL: boolean
       width: number
       height: number
     }[],
@@ -88,23 +145,50 @@ export class PostcodePDFParser extends AbstractParser implements IPostcodeParser
     pageNum: number
   ): PositionedTextItem[] {
     const colCount = 7
-    const indentOffset = 50
+    const indentOffsetX = 60
+    const boundingMaxY = 2250
+    const provinceFont = 'g_d0_f2'
+    const colWidth = (vp.width - indentOffsetX * 2) / colCount
     const criteria = new Array<number>(colCount)
       .fill(0)
-      .map((_, i) => (colCount - i - 1) * ((vp.width - indentOffset * 2) / colCount) + indentOffset)
+      .map((_, i) => (colCount - i - 1) * colWidth + indentOffsetX)
+    const centers = criteria.map((c) => c + colWidth / 2)
+    console.log('CRTERIA', criteria)
+    console.log('CENTERS', centers)
 
     // Convert PDF text items to positioned items
     const positionedItems: PositionedTextItem[] = textItems
-      .filter((a) => a.str.trim() !== '')
       .map((item) => {
+        if (item.str.trim() === '') {
+          return null
+        }
         // PDF uses transform matrix [scaleX, skewX, skewY, scaleY, translateX, translateY]
         const x = item.transform[4]
         const y = item.transform[5]
-        const colIndex = criteria.reduce(
-          (pv, offsetRequired, i) => pv || (x > offsetRequired ? colCount - i + 1 : 0),
+
+        if (y > boundingMaxY) {
+          return null
+        }
+
+        const matchedColNum = criteria.reduce(
+          (pv, offsetRequired, i) => pv || (x > offsetRequired ? i + 1 : 0),
           0
         ) // return 1~7
+        if (matchedColNum <= 0) {
+          return null
+        }
+
+        const colIndex = colCount - matchedColNum + 1
         // positioning
+        const xOffset = criteria[matchedColNum - 1]
+        const isProvince = item.fontName === provinceFont
+        const kind: PositionedTextItem['kind'] = item.str.trim().match(/^\d{5}/)
+          ? 'postcode'
+          : Math.abs(xOffset - x) < 20 // left hugged text
+            ? 'district'
+            : isProvince
+              ? 'province'
+              : 'clause'
 
         return {
           text: item.str.trim(),
@@ -113,10 +197,12 @@ export class PostcodePDFParser extends AbstractParser implements IPostcodeParser
           width: item.width,
           height: item.height,
           pageNum,
+          kind,
           column: colIndex // Will be assigned below
         }
       })
-      .filter((a) => a.column > 0)
+      .filter(Boolean)
+      .map((a) => a!)
 
     // Sort my positionedItems from top-bottom, then left-to-right (column, y)
     return positionedItems

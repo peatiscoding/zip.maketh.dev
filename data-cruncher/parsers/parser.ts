@@ -1,3 +1,4 @@
+import type { BoundDistrict, BoundProvince, BoundSubDistrict } from '@types'
 import type {
   IParser,
   IParserTarget,
@@ -10,20 +11,21 @@ import { mapValues } from 'lodash'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { TumbonFileParser } from './tumbon'
-import { PostcodePDFParser } from './postcode'
-import { BoundDistrict, BoundProvince, BoundSubDistrict } from '@types'
+import { PostcodePDFParser } from './pdf-postcode'
+
+const ID_SEP = '-'
 
 // Create default key generator
 const keyScheme: IParserDataKeyGenerator = {
   province: (provinceId, _record) => provinceId,
-  district: (provinceId, districtId, _record) => [provinceId, districtId].join('-'),
+  district: (provinceId, districtId, _record) => [provinceId, districtId].join(ID_SEP),
   subDistrict: (provinceId, districtId, subDistrictId, _record) =>
-    [provinceId, districtId, subDistrictId].join('-')
+    [provinceId, districtId, subDistrictId].join(ID_SEP)
 }
 const revertKeyScheme = {
-  toProvinceKey: (anyKey: string) => anyKey.split('-')[0],
+  toProvinceKey: (anyKey: string) => anyKey.split(ID_SEP)[0],
   toDistrictKey: (districtOrSubDistrictKey: string) => {
-    const parts = districtOrSubDistrictKey.split('-')
+    const parts = districtOrSubDistrictKey.split(ID_SEP)
     return `${parts[0]}-${parts[1]}`
   }
 }
