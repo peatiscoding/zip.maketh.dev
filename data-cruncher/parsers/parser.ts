@@ -43,13 +43,22 @@ export class Parser implements IParser {
   }
 
   async parse(target: IParserTarget): Promise<void> {
-    const boundedSubDistricts = await this.parseTumbon(target)
-    await this.parsePostCodes(target, boundedSubDistricts)
+    const { boundedSubDistricts, boundedDistricts, boundedProvinces } =
+      await this.parseTumbon(target)
+    await this.parsePostCodes(target, {
+      provinces: boundedProvinces,
+      districts: boundedDistricts,
+      subDistricts: boundedSubDistricts
+    })
   }
 
   private async parsePostCodes(
     target: IParserTarget,
-    boundedSubDistricts: BoundSubDistrict[]
+    referenceData: {
+      provinces: BoundProvince[]
+      districts: BoundDistrict[]
+      subDistricts: BoundSubDistrict[]
+    }
   ): Promise<void> {
     const emptyStream = new ReadableStream({
       start(controller) {
@@ -59,7 +68,7 @@ export class Parser implements IParser {
 
     let zipCodes: BoundZipCode[] = []
 
-    zipCodes = await this.postcode.parse(emptyStream, boundedSubDistricts)
+    zipCodes = await this.postcode.parse(emptyStream, referenceData)
 
     // Bind zip codes to sub-districts
     for (const zipCode of zipCodes) {
@@ -71,7 +80,11 @@ export class Parser implements IParser {
     console.log(`✅ Processed ${zipCodes.length} postal codes`)
   }
 
-  private async parseTumbon(target: IParserTarget): Promise<BoundSubDistrict[]> {
+  private async parseTumbon(target: IParserTarget): Promise<{
+    boundedSubDistricts: BoundSubDistrict[]
+    boundedDistricts: BoundDistrict[]
+    boundedProvinces: BoundProvince[]
+  }> {
     console.log('🔄 Starting data parsing...')
 
     // Parse Tumbon file
@@ -128,6 +141,10 @@ export class Parser implements IParser {
         return r
       }
     )
-    return Object.values(subDistricts)
+    return {
+      boundedSubDistricts: Object.values(subDistricts),
+      boundedDistricts: Object.values(districts),
+      boundedProvinces: Object.values(provinces)
+    }
   }
 }

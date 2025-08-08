@@ -1,5 +1,5 @@
 import type { IPostcodeParser } from './interface'
-import type { BoundSubDistrict, BoundZipCode } from '@types'
+import type { BoundProvince, BoundDistrict, BoundSubDistrict, BoundZipCode } from '@types'
 
 import { WebCachedParser } from './base'
 import * as cheerio from 'cheerio'
@@ -18,15 +18,26 @@ const WIKI_URL =
 export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcodeParser {
   async parse(
     _sourceStream: ReadableStream, // ignore this
-    referenceSubDistrict: BoundSubDistrict[]
+    referenceData: {
+      provinces: BoundProvince[]
+      districts: BoundDistrict[]
+      subDistricts: BoundSubDistrict[]
+    }
   ): Promise<BoundZipCode[]> {
     console.log('🌐 Processing postal codes from Wikipedia HTML...')
+
+    // Create province lookup map for on-the-fly validation
+    const provinceLookup = new Map<string, BoundProvince>()
+    for (const province of referenceData.provinces) {
+      const key = province.title.th.toLowerCase().trim()
+      provinceLookup.set(key, province)
+    }
 
     // Get cached HTML or fetch new
     const html = await this.getCachedHtml(WIKI_URL, 'wikipedia-postal-codes')
 
-    // Parse HTML content
-    const postcodeRecords = await this.parseHtmlContent(html)
+    // Parse HTML content with on-the-fly validation
+    const postcodeRecords = await this.parseHtmlContent(html, provinceLookup)
 
     console.log(`📊 Extracted ${postcodeRecords.length} postal code records from Wikipedia`)
 
@@ -43,7 +54,7 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
       if (processedZipCodes.has(record.postalCode)) continue
 
       // Find all sub-districts that match this province
-      const matchingSubDistricts = referenceSubDistrict.filter((subDistrict) => {
+      const matchingSubDistricts = referenceData.subDistricts.filter((subDistrict) => {
         const provinceTh = subDistrict.distrct.province.title.th.toLowerCase().trim()
         const provinceEn = subDistrict.distrct.province.title.en.toLowerCase().trim()
 
@@ -85,7 +96,10 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
     return zipCodes
   }
 
-  protected async parseHtmlContent(html: string): Promise<WikiPostcodeRecord[]> {
+  protected async parseHtmlContent(
+    html: string,
+    provinceLookup: Map<string, BoundProvince>
+  ): Promise<WikiPostcodeRecord[]> {
     // Parse HTML with Cheerio
     const $ = cheerio.load(html)
 
@@ -114,6 +128,26 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
       const provinceMatch = provinceText.match(/^([^\s(]+)(?:\s*\(([^)]+)\))?/)
       const provinceNameTh = provinceMatch ? provinceMatch[1] : provinceText
       const provinceNameEn = provinceMatch ? provinceMatch[2] || '' : ''
+
+      // Validate province on-the-fly using lookup map
+      const lookupKey = provinceNameTh.toLowerCase().trim()
+      if (!provinceLookup.has(lookupKey)) {
+        // Try alternative matching strategies
+        let found = false
+        for (const [key, _] of provinceLookup) {
+          if (
+            key.includes(lookupKey) ||
+            lookupKey.includes(key)
+          ) {
+            found = true
+            break
+          }
+        }
+        if (!found) {
+          console.error(`❌ Province validation failed: "${provinceNameTh}" not found in Tumbon data`)
+          throw new Error(`Province validation failed: Wikipedia province "${provinceNameTh}" does not match any Tumbon province`)
+        }
+      }
 
       // Go up one level to the div containing this h2
       const $parentDiv = $h2.parent()

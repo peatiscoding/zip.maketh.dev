@@ -44,9 +44,12 @@ export interface IPostcodeParser {
   /**
    * parse the zip code
    */
-
   parse(
     sourceStream: ReadableStream,
-    referenceSubDistrict: BoundSubDistrict[]
+    referenceData: {
+      provinces: BoundProvince[]
+      districts: BoundDistrict[]
+      subDistricts: BoundSubDistrict[]
+    }
   ): Promise<BoundZipCode[]>
 }
