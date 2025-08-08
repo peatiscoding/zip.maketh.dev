@@ -1,4 +1,4 @@
-import type { BoundDistrict, BoundProvince, BoundSubDistrict } from '@types'
+import type { BoundDistrict, BoundProvince, BoundSubDistrict, BoundZipCode } from '@types'
 import type {
   IParser,
   IParserTarget,
@@ -11,7 +11,7 @@ import { mapValues } from 'lodash'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { TumbonFileParser } from './tumbon'
-import { PostcodePDFParser } from './pdf-postcode'
+import { WikiHtmlPostcodeParser } from './wiki-html-postcode'
 
 const ID_SEP = '-'
 
@@ -38,7 +38,7 @@ export class Parser implements IParser {
 
   static create(): Parser {
     const tumbonParser = new TumbonFileParser()
-    const postcodeParser = new PostcodePDFParser()
+    const postcodeParser = new WikiHtmlPostcodeParser()
     return new Parser(tumbonParser, postcodeParser)
   }
 
@@ -51,18 +51,24 @@ export class Parser implements IParser {
     target: IParserTarget,
     boundedSubDistricts: BoundSubDistrict[]
   ): Promise<void> {
-    // Parse postcode data
-    console.log('📄 Processing postalcode.pdf...')
-    const postcodePath = join(target.ditPath, target.files.postcodes)
-    const postcodeBuffer = await readFile(postcodePath)
-    const postcodeStream = new ReadableStream({
+    const emptyStream = new ReadableStream({
       start(controller) {
-        controller.enqueue(postcodeBuffer)
         controller.close()
       }
     })
 
-    await this.postcode.parse(postcodeStream, boundedSubDistricts)
+    let zipCodes: BoundZipCode[] = []
+
+    zipCodes = await this.postcode.parse(emptyStream, boundedSubDistricts)
+
+    // Bind zip codes to sub-districts
+    for (const zipCode of zipCodes) {
+      for (const subDistrict of zipCode.subDistricts) {
+        subDistrict.zipCodes.push(zipCode)
+      }
+    }
+
+    console.log(`✅ Processed ${zipCodes.length} postal codes`)
   }
 
   private async parseTumbon(target: IParserTarget): Promise<BoundSubDistrict[]> {
