@@ -29,7 +29,7 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
     // Create province lookup map for on-the-fly validation
     const provinceLookup = new Map<string, BoundProvince>()
     for (const province of referenceData.provinces) {
-      const key = province.title.th.toLowerCase().trim()
+      const key = province.title.th.toLowerCase().trim().replace('จ. ', '')
       provinceLookup.set(key, province)
     }
 
@@ -133,7 +133,7 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
       const foundProvince = provinceLookup.get(lookupKey)
       if (!foundProvince) {
         throw new Error(
-          `Province validation failed: Wikipedia province "${provinceNameTh}" does not match any Tumbon province`
+          `Province validation failed: Wikipedia province "${provinceNameTh}" does not match any Tumbon province: ${[...provinceLookup.keys()].join(', ')}`
         )
       }
 
