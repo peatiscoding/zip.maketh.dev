@@ -15,7 +15,117 @@ interface WikiPostcodeRecord {
 const WIKI_URL =
   'https://th.wikipedia.org/wiki/%E0%B8%A3%E0%B8%B2%E0%B8%A2%E0%B8%81%E0%B8%B2%E0%B8%A3%E0%B8%A3%E0%B8%AB%E0%B8%B1%E0%B8%AA%E0%B9%84%E0%B8%9B%E0%B8%A3%E0%B8%A9%E0%B8%93%E0%B8%B5%E0%B8%A2%E0%B9%8C%E0%B9%84%E0%B8%97%E0%B8%A2'
 
+export const _helpers = {
+  /**
+   * Find sub-districts that should be excluded from the current postal code based on exception notes
+   */
+  findExcludedSubDistricts(notes: string, allSubDistricts: BoundSubDistrict[]): BoundSubDistrict[] {
+    const exceptions = _helpers.parseExceptionsFromNotes(notes)
+    const excludedSubDistricts: BoundSubDistrict[] = []
+
+    for (const exception of exceptions) {
+      for (const subDistrictName of exception.subDistrictNames) {
+        const matchingSubDistricts = allSubDistricts.filter((subDistrict) => {
+          const nameTh = subDistrict.title.th.toLowerCase()
+          const nameEn = subDistrict.title.en?.toLowerCase() || ''
+          const searchName = subDistrictName.toLowerCase()
+
+          return (
+            nameTh === searchName ||
+            nameEn === searchName ||
+            nameTh.includes(searchName) ||
+            (nameEn && nameEn.includes(searchName))
+          )
+        })
+
+        excludedSubDistricts.push(...matchingSubDistricts)
+      }
+    }
+
+    return excludedSubDistricts
+  },
+  /**
+   * Parse exception clauses from Wikipedia notes to identify sub-districts that should use different postal codes
+   * Pattern: "ยกเว้น [ตำบล/แขวง names] ใช้รหัส [postal code]"
+   *
+   * @param notes The notes text from Wikipedia
+   * @returns Array of exceptions with sub-district names and their correct postal codes
+   */
+  parseExceptionsFromNotes(
+    notes: string
+  ): Array<{ subDistrictNames: string[]; postalCode: string }> {
+    if (!notes) return []
+
+    const exceptions: Array<{ subDistrictNames: string[]; postalCode: string }> = []
+
+    // Pattern to match: ยกเว้น ... ใช้รหัส XXXXX
+    const exceptionPattern = /ยกเว้น([^ใช้]+)ใช้รหัส\s*(\d{5})/g
+
+    let match
+    while ((match = exceptionPattern.exec(notes)) !== null) {
+      const exceptionText = match[1].trim()
+      const postalCode = match[2]
+
+      // Extract sub-district names from the exception text
+      const subDistrictNames: string[] = []
+
+      // Patterns for sub-district names - more precise matching
+      const namePatterns = [
+        /ตำบล([^\s,และใช้เฉพาะ]+)/g, // "ตำบลXXX"
+        /แขวง([^\s,และใช้เฉพาะ]+)/g // "แขวงXXX" (for Bangkok)
+      ]
+
+      for (const namePattern of namePatterns) {
+        let nameMatch
+        while ((nameMatch = namePattern.exec(exceptionText)) !== null) {
+          subDistrictNames.push(nameMatch[1].trim())
+        }
+      }
+
+      if (subDistrictNames.length > 0) {
+        exceptions.push({ subDistrictNames, postalCode })
+      }
+    }
+
+    return exceptions
+  }
+}
+
 export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcodeParser {
+  /**
+   * Find sub-districts by their Thai names
+   */
+  private findSubDistrictsByNames(
+    subDistrictNames: string[],
+    allSubDistricts: BoundSubDistrict[]
+  ): BoundSubDistrict[] {
+    const foundSubDistricts: BoundSubDistrict[] = []
+
+    for (const subDistrictName of subDistrictNames) {
+      const matchingSubDistricts = allSubDistricts.filter((subDistrict) => {
+        const nameTh = subDistrict.title.th.toLowerCase()
+        const nameEn = subDistrict.title.en?.toLowerCase() || ''
+        const searchName = subDistrictName.toLowerCase()
+
+        return (
+          nameTh === searchName ||
+          nameEn === searchName ||
+          nameTh.includes(searchName) ||
+          (nameEn && nameEn.includes(searchName))
+        )
+      })
+
+      foundSubDistricts.push(...matchingSubDistricts)
+    }
+
+    // Remove duplicates
+    const uniqueSubDistricts = foundSubDistricts.filter(
+      (subDistrict, index, arr) => arr.findIndex((s) => s.code === subDistrict.code) === index
+    )
+
+    return uniqueSubDistricts
+  }
+
   async parse(
     _sourceStream: ReadableStream, // ignore this
     referenceData: {
@@ -46,15 +156,12 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
       throw new Error('No Wikipedia postal code data found')
     }
 
-    // Convert to BoundZipCode array
-    const zipCodes: BoundZipCode[] = []
-    const processedZipCodes = new Set<string>()
+    // Convert to BoundZipCode array with exception handling
+    const zipCodeMap = new Map<string, BoundZipCode>()
 
     for (const record of postcodeRecords) {
-      if (processedZipCodes.has(record.postalCode)) continue
-
       // Find all sub-districts that match this province
-      const matchingSubDistricts = referenceData.subDistricts.filter((subDistrict) => {
+      let matchingSubDistricts = referenceData.subDistricts.filter((subDistrict) => {
         const provinceTh = subDistrict.distrct.province.title.th.toLowerCase().trim()
         const provinceEn = subDistrict.distrct.province.title.en.toLowerCase().trim()
 
@@ -72,24 +179,84 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
         )
       })
 
+      // Remove excluded sub-districts based on exception notes
+      const excludedSubDistricts = _helpers.findExcludedSubDistricts(
+        record.notes,
+        matchingSubDistricts
+      )
+      if (excludedSubDistricts.length > 0) {
+        const excludedCodes = new Set(excludedSubDistricts.map((s) => s.code))
+        matchingSubDistricts = matchingSubDistricts.filter((s) => !excludedCodes.has(s.code))
+      }
+
       if (matchingSubDistricts.length > 0) {
         // Limit to reasonable number of sub-districts per postal code
-        const limitedSubDistricts = matchingSubDistricts.slice(0, 20)
+        const limitedSubDistricts = matchingSubDistricts.slice(0, 50)
 
-        const zipCode: BoundZipCode = {
-          code: record.postalCode,
-          subDistricts: limitedSubDistricts
+        // Get or create zip code record
+        let zipCode = zipCodeMap.get(record.postalCode)
+        if (!zipCode) {
+          zipCode = {
+            code: record.postalCode,
+            subDistricts: []
+          }
+          zipCodeMap.set(record.postalCode, zipCode)
         }
 
-        zipCodes.push(zipCode)
-        processedZipCodes.add(record.postalCode)
+        // Add sub-districts that aren't already included
+        for (const subDistrict of limitedSubDistricts) {
+          if (!zipCode.subDistricts.some((existing) => existing.code === subDistrict.code)) {
+            zipCode.subDistricts.push(subDistrict)
+          }
+        }
 
         const provinceName = limitedSubDistricts[0]?.distrct.province.title.th || 'Unknown'
+        const excludedCount = excludedSubDistricts.length
         console.log(
-          `📮 ${record.postalCode} -> ${limitedSubDistricts.length} sub-districts in ${provinceName}`
+          `📮 ${record.postalCode} -> ${zipCode.subDistricts.length} sub-districts in ${provinceName}${excludedCount > 0 ? ` (excluded ${excludedCount})` : ''}`
         )
       }
+
+      // Process exceptions: add excluded sub-districts to their correct postal codes
+      if (record.notes) {
+        const exceptions = _helpers.parseExceptionsFromNotes(record.notes)
+        for (const exception of exceptions) {
+          const exceptionSubDistricts = this.findSubDistrictsByNames(
+            exception.subDistrictNames,
+            referenceData.subDistricts
+          )
+
+          if (exceptionSubDistricts.length > 0) {
+            // Get or create zip code record for exception postal code
+            let exceptionZipCode = zipCodeMap.get(exception.postalCode)
+            if (!exceptionZipCode) {
+              exceptionZipCode = {
+                code: exception.postalCode,
+                subDistricts: []
+              }
+              zipCodeMap.set(exception.postalCode, exceptionZipCode)
+            }
+
+            // Add exception sub-districts
+            for (const subDistrict of exceptionSubDistricts) {
+              if (
+                !exceptionZipCode.subDistricts.some(
+                  (existing) => existing.code === subDistrict.code
+                )
+              ) {
+                exceptionZipCode.subDistricts.push(subDistrict)
+              }
+            }
+
+            console.log(
+              `📮 ${exception.postalCode} -> added ${exceptionSubDistricts.length} exception sub-districts from ${record.postalCode}`
+            )
+          }
+        }
+      }
     }
+
+    const zipCodes = Array.from(zipCodeMap.values())
 
     console.log(`✅ Created ${zipCodes.length} postal code mappings from Wikipedia data`)
 
@@ -174,8 +341,6 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
                 postalCode: postcode,
                 notes: noteText
               })
-
-              // Removed excessive logging
             })
           }
         })
