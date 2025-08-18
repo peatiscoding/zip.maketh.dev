@@ -19,8 +19,8 @@ export const _helpers = {
   /**
    * Find sub-districts that should be excluded from the current postal code based on exception notes
    */
-  findExcludedSubDistricts(notes: string, allSubDistricts: BoundSubDistrict[]): BoundSubDistrict[] {
-    const exceptions = _helpers.parseExceptionsFromNotes(notes)
+  parseExcludedSubDistricts(note: string, allSubDistricts: BoundSubDistrict[]): BoundSubDistrict[] {
+    const exceptions = _helpers.parseExceptionsFromNotes(note)
     const excludedSubDistricts: BoundSubDistrict[] = []
 
     for (const exception of exceptions) {
@@ -128,7 +128,7 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
 
   async parse(
     _sourceStream: ReadableStream, // ignore this
-    referenceData: {
+    refData: {
       provinces: BoundProvince[]
       districts: BoundDistrict[]
       subDistricts: BoundSubDistrict[]
@@ -138,7 +138,7 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
 
     // Create province lookup map for on-the-fly validation
     const provinceLookup = new Map<string, BoundProvince>()
-    for (const province of referenceData.provinces) {
+    for (const province of refData.provinces) {
       const key = province.title.th.toLowerCase().trim().replace('จ. ', '')
       provinceLookup.set(key, province)
     }
@@ -147,41 +147,45 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
     const html = await this.getCachedHtml(WIKI_URL, 'wikipedia-postal-codes')
 
     // Parse HTML content with on-the-fly validation
-    const postcodeRecords = await this.parseHtmlContent(html, provinceLookup)
+    const rawWikiRows = await this.parseHtmlContent(html, provinceLookup)
 
-    console.log(`📊 Extracted ${postcodeRecords.length} postal code records from Wikipedia`)
+    console.log(`📊 Extracted ${rawWikiRows.length} postal code records from Wikipedia`)
 
     // Remove the arbitrary minimum threshold since we have a structured approach
-    if (postcodeRecords.length === 0) {
+    if (rawWikiRows.length === 0) {
       throw new Error('No Wikipedia postal code data found')
     }
 
     // Convert to BoundZipCode array with exception handling
     const zipCodeMap = new Map<string, BoundZipCode>()
 
-    for (const record of postcodeRecords) {
+    for (const row of rawWikiRows) {
+      const rowProvinceTh = row.provinceNameTh.toLowerCase().trim()
+      const rowProvinceEn = row.provinceNameEn.toLowerCase().trim()
+
+      const rowDistrictTh = row.districtName.toLowerCase().trim()
       // Find all sub-districts that match this province
-      let matchingSubDistricts = referenceData.subDistricts.filter((subDistrict) => {
+      let matchingSubDistricts = refData.subDistricts.filter((subDistrict) => {
         const provinceTh = subDistrict.distrct.province.title.th.toLowerCase().trim()
         const provinceEn = subDistrict.distrct.province.title.en.toLowerCase().trim()
 
-        const recordProvinceTh = record.provinceNameTh.toLowerCase().trim()
-        const recordProvinceEn = record.provinceNameEn.toLowerCase().trim()
-
         return (
-          provinceTh === recordProvinceTh ||
-          provinceTh.includes(recordProvinceTh) ||
-          recordProvinceTh.includes(provinceTh) ||
-          (recordProvinceEn &&
-            (provinceEn === recordProvinceEn ||
-              provinceEn.includes(recordProvinceEn) ||
-              recordProvinceEn.includes(provinceEn)))
+          (provinceTh === rowProvinceTh ||
+            provinceTh.includes(rowProvinceTh) ||
+            rowProvinceTh.includes(provinceTh) ||
+            (rowProvinceEn &&
+              (provinceEn === rowProvinceEn ||
+                provinceEn.includes(rowProvinceEn) ||
+                rowProvinceEn.includes(provinceEn)))) &&
+          rowDistrictTh === subDistrict.distrct.title.th
         )
       })
 
+      console.log(`MATCHED: ${rowProvinceTh}/${rowDistrictTh} ${matchingSubDistricts.length}`)
+
       // Remove excluded sub-districts based on exception notes
-      const excludedSubDistricts = _helpers.findExcludedSubDistricts(
-        record.notes,
+      const excludedSubDistricts = _helpers.parseExcludedSubDistricts(
+        row.notes,
         matchingSubDistricts
       )
       if (excludedSubDistricts.length > 0) {
@@ -194,13 +198,13 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
         const limitedSubDistricts = matchingSubDistricts.slice(0, 50)
 
         // Get or create zip code record
-        let zipCode = zipCodeMap.get(record.postalCode)
+        let zipCode = zipCodeMap.get(row.postalCode)
         if (!zipCode) {
           zipCode = {
-            code: record.postalCode,
+            code: row.postalCode,
             subDistricts: []
           }
-          zipCodeMap.set(record.postalCode, zipCode)
+          zipCodeMap.set(row.postalCode, zipCode)
         }
 
         // Add sub-districts that aren't already included
@@ -213,17 +217,17 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
         const provinceName = limitedSubDistricts[0]?.distrct.province.title.th || 'Unknown'
         const excludedCount = excludedSubDistricts.length
         console.log(
-          `📮 ${record.postalCode} -> ${zipCode.subDistricts.length} sub-districts in ${provinceName}${excludedCount > 0 ? ` (excluded ${excludedCount})` : ''}`
+          `📮 ${row.postalCode} -> ${zipCode.subDistricts.length} sub-districts in ${provinceName}${excludedCount > 0 ? ` (excluded ${excludedCount})` : ''}`
         )
       }
 
       // Process exceptions: add excluded sub-districts to their correct postal codes
-      if (record.notes) {
-        const exceptions = _helpers.parseExceptionsFromNotes(record.notes)
+      if (row.notes) {
+        const exceptions = _helpers.parseExceptionsFromNotes(row.notes)
         for (const exception of exceptions) {
           const exceptionSubDistricts = this.findSubDistrictsByNames(
             exception.subDistrictNames,
-            referenceData.subDistricts
+            refData.subDistricts
           )
 
           if (exceptionSubDistricts.length > 0) {
@@ -249,7 +253,7 @@ export class WikiHtmlPostcodeParser extends WebCachedParser implements IPostcode
             }
 
             console.log(
-              `📮 ${exception.postalCode} -> added ${exceptionSubDistricts.length} exception sub-districts from ${record.postalCode}`
+              `📮 ${exception.postalCode} -> added ${exceptionSubDistricts.length} exception sub-districts from ${row.postalCode}`
             )
           }
         }

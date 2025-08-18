@@ -8,6 +8,7 @@ interface ExcelRow {
   CHANGWAT_T: string
   CHANGWAT_E: string
   AM_ID: number
+  AMPHOE_T: string
   AMPHOE_E: string
   TA_ID: number
   TAMBON_T: string
@@ -61,7 +62,7 @@ export class TumbonFileParser extends AbstractParser implements ITumbonParser {
       const province: RawProvince = {
         code: row.CH_ID.toString(),
         title: {
-          th: row.CHANGWAT_T,
+          th: row.CHANGWAT_T.replace(/จ\.\s?/, ''),
           en: row.CHANGWAT_E
         }
       }
@@ -75,7 +76,7 @@ export class TumbonFileParser extends AbstractParser implements ITumbonParser {
       const district: RawDistrict = {
         code: row.AM_ID.toString(),
         title: {
-          th: row.AMPHOE_E, // Only English name available
+          th: (row.AMPHOE_T || row.AMPHOE_E).replace(/อ\.\s?/, ''), // Only English name available
           en: row.AMPHOE_E
         }
       }
@@ -93,7 +94,7 @@ export class TumbonFileParser extends AbstractParser implements ITumbonParser {
       const subDistrict: RawSubDistrict = {
         code: row.TA_ID.toString(),
         title: {
-          th: row.TAMBON_T,
+          th: (row.TAMBON_T || row.TAMBON_E).replace(/ต\.\s?/, ''),
           en: row.TAMBON_E
         }
       }
